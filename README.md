@@ -2,6 +2,7 @@
 ну кароче говоря 4 файла 
 
 1.(magnitola.py) - это плагин для бота, который используется в ретарда для дискорда
+
 this plugin for bot
 
 2.(player.py) - это модифицированная версия (https://github.com/b1naryth1ef/disco/blob/master/disco/voice/player.py) где изменина одна строчка, в функции skip
