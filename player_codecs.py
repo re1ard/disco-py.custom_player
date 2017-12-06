@@ -96,13 +96,23 @@ class OpusFilePlayable(BasePlayable, AbstractOpus):
 
 
 class FFmpegInput(BaseInput, AbstractOpus):
-    def __init__(self, source='-', command='avconv', streaming=False, bass=0, **kwargs):
+    def __init__(self, source='-', command='avconv', streaming=False, bass=0, user_id = 0, channel_id = 0 ,guild_id = 0, duration = 0, artist = 0, title = 0, filesize = 0, respond = unicode , **kwargs):
         super(FFmpegInput, self).__init__(**kwargs)
         if source:
             self.source = source
+
         self.streaming = streaming
         self.command = command
 	self.bass = bass
+	self.user_id = user_id
+	self.channel_id = channel_id
+	self.guild_id = guild_id
+	self.duration = duration
+	self.artist = artist
+	self.title = title
+	self.filesize = filesize
+	self.respond = respond
+	self.played = 0.0
 
         self._buffer = None
         self._proc = None
@@ -125,7 +135,6 @@ class FFmpegInput(BaseInput, AbstractOpus):
         return self._buffer.read(sz)
 
     def killed(self):
-	print u'try kill'
 	self.proc.kill()
 	self.stream = 0
 
@@ -152,9 +161,9 @@ class FFmpegInput(BaseInput, AbstractOpus):
                 '-ac', str(self.channels),
 		'-af', 'bass=g={}'.format(self.bass),
                 '-loglevel', 'error',
-                'pipe:1',
+                'pipe:1'
             ]
-	    print args
+	    print u"Now in {}.{} playing {} - {}, {} sec, request from {}. File size: {} Mb".format(self.guild_id,self.channel_id,self.artist,self.title,self.duration,self.user_id,self.filesize/1024/1024)
             self._proc = subprocess.Popen(args, stdin=None, stdout=subprocess.PIPE)
         return self._proc
 
@@ -173,8 +182,6 @@ class BufferedOpusEncoderPlayable(BasePlayable, OpusEncoder, AbstractOpus):
     def next_frame(self):
 	raw = self.source.read(self.frame_size)
 	if len(raw) < self.frame_size:
-		print 'end stream'
-		#print dir(self.source)
 		self.source._proc = None
 		self.source._buffer = None
 		self.source = None
@@ -186,7 +193,6 @@ class DCADOpusEncoderPlayable(BasePlayable, AbstractOpus, OpusEncoder):
     def __init__(self, source, *args, **kwargs):
         self.source = source
         self.command = kwargs.pop('command', 'dcad')
-	print self.command
         self.on_complete = kwargs.pop('on_complete', None)
         super(DCADOpusEncoderPlayable, self).__init__(*args, **kwargs)
 

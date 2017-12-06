@@ -1,6 +1,8 @@
 import time
 import gevent
 
+from datetime import timedelta as sectohum
+
 from holster.enum import Enum
 from holster.emitter import Emitter
 
@@ -21,6 +23,12 @@ class Player(object):
 
     def __init__(self, client, queue=None):
         self.client = client
+
+	self.last_activity = time.time()
+
+	self.force_kick = False
+
+	self.already_play = False
 
         # Queue contains playable items
         self.queue = queue or PlayableQueue()
@@ -104,6 +112,7 @@ class Player(object):
 
             next_time = start + 0.02 * loops
             delay = max(0, 0.02 + (next_time - time.time()))
+	    item.source.played += delay
             gevent.sleep(delay)
 
     def run(self):
@@ -111,11 +120,23 @@ class Player(object):
 
         while self.playing:
             self.now_playing = self.queue.get()
-
+	    self.already_play = True
             self.events.emit(self.Events.START_PLAY, self.now_playing)
             self.play_task = gevent.spawn(self.play, self.now_playing)
+
+	    self.now_playing.source.respond(u"""
+:radio: Teper igraete komposiciya: {}, avtora {}
+:stopwatch: idet dannaya muzika {}.
+
+:chicken: Zakazal etu govninu <@{}>
+:performing_arts: Igraet v anale <@{}>
+:gear: Bass raven {} dB.
+""".format(self.now_playing.source.title,self.now_playing.source.artist,sectohum(seconds=int(self.now_playing.source.duration)),self.now_playing.source.user_id,self.now_playing.source.channel_id,self.now_playing.source.bass))
+
             self.play_task.join()
             self.events.emit(self.Events.STOP_PLAY, self.now_playing)
+	    self.already_play = False
+	    self.last_activity = time.time()
 
             if self.client.state == VoiceState.DISCONNECTED:
                 self.playing = False

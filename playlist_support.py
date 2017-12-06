@@ -14,15 +14,19 @@ def get_playlist(api,playlist):
 	else:
 		return api.http.get('https://m.vk.com/audio',params={'act':playlist[0],'access_hash':playlist[1]})
 
-def scrap_data_playlist(html):
+def scrap_data_playlist(html,user_id):
 	soup = BeautifulSoup(html, 'html.parser')
 	tracks = []
 
 	for audio in soup.find_all('div', {'class': 'ai_body'}):
-		link = audio.input['value']
+		original_link = audio.input['value']
 
-		if 'audio_api_unavailable' in link:
-			link = decode_audio_url(link)
+		if 'audio_api_unavailable' in original_link:
+			link = decode_audio_url(original_link,user_id)
+			count = 0
+			while not 'https://' in link:
+				link = decode_audio_url(original_link,count)
+				count += 1
 
 		tracks.append({
 			'artist':audio.select('.ai_artist')[0].text,
