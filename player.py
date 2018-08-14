@@ -1,27 +1,28 @@
 import time
 import gevent
 
-from datetime import timedelta as sectohum
-
 from holster.enum import Enum
 from holster.emitter import Emitter
 
 from disco.voice.client import VoiceState
 from disco.voice.queue import PlayableQueue
+from disco.util.logging import LoggingClass
 
-MAX_TIMESTAMP = 4294967295
+from datetime import timedelta as sectohum
+from websocket import WebSocketConnectionClosedException
 
 
-class Player(object):
+class Player(LoggingClass):
     Events = Enum(
         'START_PLAY',
         'STOP_PLAY',
         'PAUSE_PLAY',
         'RESUME_PLAY',
-        'DISCONNECT'
+        'DISCONNECT',
     )
 
     def __init__(self, client, queue=None):
+        super(Player, self).__init__()
         self.client = client
 
 	self.last_activity = time.time()
@@ -29,6 +30,10 @@ class Player(object):
 	self.force_kick = False
 
 	self.already_play = False
+
+	self.force_return = 1
+	self.max_returns = 1
+	self.sleep_time_returns = 30
 
         # Queue contains playable items
         self.queue = queue or PlayableQueue()
@@ -52,14 +57,18 @@ class Player(object):
         self.complete = gevent.event.Event()
 
         # Event emitter for metadata
-        self.events = Emitter(gevent.spawn)
+        self.events = Emitter()
 
     def disconnect(self):
         self.client.disconnect()
         self.events.emit(self.Events.DISCONNECT)
 
     def skip(self):
-	self.now_playing.source.killed()
+	if self.now_playing and self.now_playing.source:
+		self.now_playing.source.killed()
+	else:
+		print u'source have unknown type???'
+
 
     def pause(self):
         if self.paused:
@@ -68,9 +77,10 @@ class Player(object):
         self.events.emit(self.Events.PAUSE_PLAY)
 
     def resume(self):
-        self.paused.set()
-        self.paused = None
-        self.events.emit(self.Events.RESUME_PLAY)
+        if self.paused:
+            self.paused.set()
+            self.paused = None
+            self.events.emit(self.Events.RESUME_PLAY)
 
     def play(self, item):
         # Grab the first frame before we start anything else, sometimes playables
@@ -83,6 +93,10 @@ class Player(object):
 
         start = time.time()
         loops = 0
+
+	if item.source.need_alarm:
+		#item.source.respond(embed = item.source.embed)
+		gevent.spawn(item.source.respond,embed = item.source.embed)
 
         while True:
             loops += 1
@@ -99,15 +113,39 @@ class Player(object):
                 return
 
             if self.client.state != VoiceState.CONNECTED:
-                self.client.state_emitter.wait(VoiceState.CONNECTED)
+                self.client.state_emitter.once(VoiceState.CONNECTED, timeout=30)
 
-            self.client.send_frame(frame)
-            self.client.timestamp += item.samples_per_frame
-            if self.client.timestamp > MAX_TIMESTAMP:
-                self.client.timestamp = 0
+            # Send the voice frame and increment our timestamp
+	    try:
+            	self.client.send_frame(frame)
+            	self.client.increment_timestamp(item.samples_per_frame)
+	    	self.client.set_speaking(True)
+	    except WebSocketConnectionClosedException as error:
+		print "WS Error: {}, gid: {}".format(error,self.client.channel.guild_id)
+		self.client.set_state(VoiceState.DISCONNECTED)
+		while self.force_return and item.source.proc_working:
+			print "gid: {}, try number: {}, connect to WebSocket".format(self.client.channel.guild_id,self.max_returns)
+			self.max_returns += 1
+			try:
+				self.client.connect(timeout = 60)
+				self.max_returns = 0
+				break
+			except Exception as error:
+				print "gid: {}, connect error: {}, sleep...".format(self.client.channel.guild_id,error)
+				gevent.sleep(self.sleep_time_returns)
 
+	    # Check proc live
+	    if not item.source.proc_working:
+		self.client.set_speaking(False)
+		return
+
+	    # Get next
             frame = item.next_frame()
+	    self.last_activity = time.time()
             if frame is None:
+		self.client.set_speaking(False)
+		if item.source:
+			item.source.proc_working = False
                 return
 
             next_time = start + 0.02 * loops
@@ -116,27 +154,24 @@ class Player(object):
             gevent.sleep(delay)
 
     def run(self):
-        self.client.set_speaking(True)
+        #self.client.set_speaking(True)
 
         while self.playing:
             self.now_playing = self.queue.get()
-	    self.already_play = True
+
             self.events.emit(self.Events.START_PLAY, self.now_playing)
             self.play_task = gevent.spawn(self.play, self.now_playing)
 
-	    self.now_playing.source.respond(u"""
-:radio: Teper igraete komposiciya: {}, avtora {}
-:stopwatch: idet dannaya muzika {}.
-
-:chicken: Zakazal etu govninu <@{}>
-:performing_arts: Igraet v anale <@{}>
-:gear: Bass raven {} dB.
-""".format(self.now_playing.source.title,self.now_playing.source.artist,sectohum(seconds=int(self.now_playing.source.duration)),self.now_playing.source.user_id,self.now_playing.source.channel_id,self.now_playing.source.bass))
+	    self.already_play = True
+	    self.last_activity = time.time()
 
             self.play_task.join()
             self.events.emit(self.Events.STOP_PLAY, self.now_playing)
+
+	    if self.now_playing and self.now_playing.source:
+	    	self.now_playing.source.proc_working = False
 	    self.already_play = False
-	    self.last_activity = time.time()
+
 
             if self.client.state == VoiceState.DISCONNECTED:
                 self.playing = False

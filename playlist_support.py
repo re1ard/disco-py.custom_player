@@ -31,7 +31,7 @@ def scrap_data_playlist(html,user_id):
 		tracks.append({
 			'artist':audio.select('.ai_artist')[0].text,
 			'title':audio.select('.ai_title')[0].text,
-			'dur':int(audio.select('.ai_dur')[0]['data-dur']),
+			'duration':int(audio.select('.ai_dur')[0]['data-dur']),
 			'url':link
 		})
 	return tracks
