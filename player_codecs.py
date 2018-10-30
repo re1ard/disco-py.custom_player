@@ -98,141 +98,117 @@ class OpusFilePlayable(BasePlayable, AbstractOpus):
 
 
 class FFmpegInput(BaseInput, AbstractOpus):
-    def __init__(self, source='-', command='avconv', streaming=False, bass=0, user_id = 0, channel_id = 0 ,guild_id = 0, duration = 0, artist = 0, title = 0, filesize = 0, respond = unicode, need_alarm = True, live_stream = False, abdulov = False, local_file = False, executer = None, **kwargs):
-        super(FFmpegInput, self).__init__(**kwargs)
-        if source:
-            self.source = source
+        def __init__(self,source = "",**kwargs):
 
-        self.streaming = streaming
-        self.command = command
-	self.bass = bass
-	self.user_id = user_id
-	self.channel_id = channel_id
-	self.guild_id = guild_id
-	self.duration = duration
-	self.artist = artist
-	self.title = title
-	self.filesize = filesize
-	self.respond = respond
-	self.played = 0.0
-	self.vote_users = []
-	self.need_alarm = need_alarm
-	self.live_stream = live_stream
-	self.abdulov = abdulov
-	self.local_file = local_file
-	self.executer = executer
+                #for key,data in kwargs.items():
+                #        setattr(self,key,data)
+                        
+                super(FFmpegInput, self).__init__()
+                self.command = "ffmpeg"
+                self.source = source
 
-        self._buffer = None
-        self._proc = None
-	self.stream = 1
-	self.proc_working = False
-	
-	self.build_embed()
+                for key,data in kwargs.items():
+                        setattr(self,key,data)
 
-	self.error_embed = MessageEmbed()
-	self.error_embed.set_author(name = u'Retarded Magnitola Play Error Header',icon_url = u'https://pp.userapi.com/c846021/v846021803/6924d/jYvIcO1FU2k.jpg')
-	self.error_embed.title = u'FFMPEG returned error'
-	self.error_embed.set_footer(text='Powered RetardBot Engine | https://discord.gg/tG35Y4b | gsd#6615')
+                self.about = {}
+                for key in [u"pid",u"guild_id",u"channel_id",u"user_id",u"artist",u"title",u"duration",u"filesize_mb"]:
+                        self.about.update({key:getattr(self,key,None)})
+                
+                try:
+                        self.about['filesize_mb'] = getattr(self,u'filesize',0) / 1024 / 1024
+                except:
+                        self.about['filesize_mb'] = 0
 
-	self.build_cmd()
+                for key in self.about.keys():
+                        try:
+                                if type(self.about[key]) in [int,bool]:
+                                        self.about[key] = unicode(self.about[key])
+                                elif type(self.about[key]) in [str]:
+                                        self.about[key] = unicode(self.about[key],"utf-8")
+                                else:
+                                        self.about[key] = unicode(self.about[key])
+                        except Exception as error:
+                                self.about[key] = u"{}".format(error)
 
-    def build_embed(self):
-	self.embed = MessageEmbed()
-	self.embed.set_author(name = u'Retarded Magnitola', url=u'https://vk.cc/7kdHoP',icon_url = u'https://pp.userapi.com/c836336/v836336785/1ec0a/Utfj9j7yfSI.jpg')
-	self.embed.title = u'Now play:'
-	self.embed.url = self.source
-	self.embed.add_field(name = u'Time:', value = u'{}'.format(sectohum(seconds=int(self.duration))),inline=True)
-	self.embed.add_field(name = u'Bass:', value = u'{} dB'.format(self.bass),inline=True)
-	self.embed.add_field(name = u'Request:', value = u'<@!{}>'.format(self.user_id),inline=True)
-	self.embed.add_field(name = u'Channel:', value = u'<#{}>'.format(self.channel_id))
-	self.embed.description = u'Title: {}\nAuthor: {}'.format(self.title,self.artist)
-	self.embed.set_footer(text='Powered RetardBot Engine | https://discord.gg/tG35Y4b | gsd#6615')
-	return True
+                self.process = None
+                self.stream = 1
+                self.proc_working = False
+                self.played = 0.0
+                self.vote_users = []
+                self.error = None
+                
+                self.build_embed()
+                self.build_error_embed()
+                self.cmd_args = self.build_cmd()
 
-    def build_cmd(self,source = None,use_executer = False):
-	self.cmd_args = []
-	if not source:
-		source = self.source
-	if use_executer:
-		try:
-			track = use_executer(source,download=False, process=False)
-		except Exception as e:
-			return True	
+        def build_error_embed(self):
+                self.error_embed = MessageEmbed()
+                self.error_embed.set_author(name = u'Retarded Magnitola Play Error Header',icon_url = u'https://cdn.discordapp.com/attachments/499206696657223680/499206822045941780/run.gif')
+                self.error_embed.title = u'FFMPEG returned error'
+                self.error_embed.set_footer(text='Powered RetardBot Engine | https://discord.gg/tG35Y4b | gsd#6615')
+                return True
 
-	if not self.live_stream:
-		if self.local_file:
-			self.cmd_args = [
-				self.command,
-				'-i', str(source)
-				]
-		else:
-			self.cmd_args = [
-				self.command,
-				'-reconnect', '1',
-				'-reconnect_at_eof', '1',
-				'-reconnect_streamed', '1',
-				'-reconnect_delay_max', '3000',
-				'-i', str(source)
-				]
-			
-	else:
-		self.cmd_args = [
-			"python",
-			"./stream_support.py", 
-			source
-			]
+        def build_embed(self):
+                self.embed = MessageEmbed()
+                self.embed.set_author(name = u'Retarded Magnitola', url=u'https://vk.cc/7kdHoP',icon_url = u'https://cdn.discordapp.com/attachments/499206696657223680/499206798851440641/kekbi.gif')
+                self.embed.title = u'Now play:'
+                self.embed.url = self.source
+                self.embed.add_field(name = u'Time:', value = u'{}'.format(sectohum(seconds=int(self.duration))),inline=True)
+                self.embed.add_field(name = u'Bass:', value = u'{} dB'.format(self.bass.value),inline=True)
+                self.embed.add_field(name = u'Request:', value = u'<@!{}>'.format(self.user_id),inline=True)
+                self.embed.add_field(name = u'Channel:', value = u'<#{}>'.format(self.channel_id),inline=True)
+                self.embed.add_field(name = u'Replay:', value = u'{}'.format(getattr(self,"replay",False)),inline=True)
+                self.embed.description = u'Title: {}\nAuthor: {}'.format(self.title,self.artist)
+                self.embed.set_footer(text='Powered RetardBot Engine | https://discord.gg/tG35Y4b | gsd#6615')
+                return True
 
-	self.cmd_args += [
-			'-vn',
-			'-f','s16le',
-			'-ar', str(self.sampling_rate),
-			'-ac', str(self.channels),
-			'-af','bass=g={}'.format(self.bass)
-			]
+        def build_cmd(self):
+                player_args = []
+                net_source_args = ['-reconnect','1','-reconnect_at_eof', '1','-reconnect_streamed','1','-reconnect_delay_max','3000']
+                other_args = ['-vn','-f','s16le','-ar', getattr(self,"sampling_rate",48000),'-ac', getattr(self,"channels",2),'-af','bass=g={}'.format(getattr(getattr(self,"bass",None),"value",0))]
+                if getattr(self,u"live_stream",False):
+                        player_args.append(u"python")
+                        player_args.append(u"./stream_support.py")
+                        player_args.append(self.source)
+                else:
+                        player_args.append(self.command)
 
+                        if getattr(self,u"replay",False):
+                                player_args.append(u"-stream_loop")
+                                player_args.append(u"-1")
 
-	if self.abdulov:
-		self.cmd_args[len(self.cmd_args)-1] += ",rubberband=pitch=0.8,rubberband=tempo=1.2,volume=1.5"
+                        if not getattr(self,u"local_file",False):
+                                player_args += net_source_args
+                        
+                        player_args.append(u"-i")
+                        player_args.append(self.source)
 
-	self.cmd_args += [
-			'-loglevel', 'error',
-			'pipe:1'
-			]
+                player_args += other_args
+                if getattr(self,"abdulov",False):
+                        player_args[len(player_args)-1] += ",rubberband=pitch=0.8,rubberband=tempo=1.2,volume=1.5"
+                player_args.append("-loglevel")
+                player_args.append("error")
+                player_args.append("pipe:1")
+                return [str(i) for i in player_args]
 
-	return True
+        def killed(self):
+                self.stream = 0
+                self.proc_working = False
+                try:
+                        self.process.kill()
+                except:
+                        pass
 
-    def read(self,sz):
-	return self.proc.stdout.read(sz)
+                return True
 
-    def killed(self):
-	self.stream = 0
-	self.proc_working = False
-	self.proc.kill()
-	return True
+        def read(self,chunk_size = 4096):
+                return self.process.stdout.read(chunk_size)
 
-    def fileobj(self):
-        if self.streaming:
-            return self.proc.stdout
-        else:
-            return self
-
-    @property
-    def proc(self):
-        if not self._proc:
-            if callable(self.source):
-                self.source = self.source(self)
-
-            if isinstance(self.source, (tuple, list)):
-                self.source, self.metadata = self.source
-	
-	    #if self.executer:
-		#self.build_cmd
-
-	    self._proc = subprocess.Popen(self.cmd_args,bufsize = 81920, stdin=None, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-	    self.proc_working = True
-	    self.embed.add_field(name = u'Start Playing:', value = strftime("%H:%M:%S", localtime(time())),inline=True)
-	    print u"Now in {}.{} playing {} - {}, {} sec, request from {}. File size: {} Mb. PID: {}".format(self.guild_id,self.channel_id,self.artist,self.title,self.duration,self.user_id,self.filesize/1024/1024,self.proc.pid)
-        return self._proc
+        def fileobj(self):
+                if getattr(self,"streaming",False):
+                        return self.process.stdout
+                else:
+                        return self
 
 class BufferedOpusEncoderPlayable(BasePlayable, OpusEncoder, AbstractOpus):
     def __init__(self, source, *args, **kwargs):
@@ -246,22 +222,36 @@ class BufferedOpusEncoderPlayable(BasePlayable, OpusEncoder, AbstractOpus):
         #  that AbstractOpus sets up
         OpusEncoder.__init__(self, self.sampling_rate, self.channels)
 
+    def __str__(self):
+        return u"{pid:5}|{guild_id}|{channel_id}|{user_id}|{artist} - {title} / {duration} sec / {filesize_mb} Mb".format(**self.source.about)#.encode('utf8','ignore')#self.source.about.get("pid",None),self.source.about.get("guild_id",None),self.source.about.get("channel_id",None),self.source.about.get("user_id",None),self.source.about.get("artist",None),self.source.about.get("title",None),self.source.about.get("duration",None),self.source.about.get("filesize_mb",None))
+
+    def __unicode__(self):
+        return u"{pid:5}|{guild_id}|{channel_id}|{user_id}|{artist} - {title} / {duration} sec / {filesize_mb} Mb".format(**self.source.about)
+
+    def check_error(self):
+        try:
+                have_error = self.source.process.stderr.read()
+                if have_error:
+                        self.source.error_embed.description = have_error
+                        self.source.error_embed.add_field(name = u'Last played time:', value = u'{}'.format(sectohum(seconds=int(self.source.played))),inline=True)
+                        self.source.error = have_error
+        except Exception as error:
+                print error
+                pass
+
     def next_frame(self):
-	raw = self.source.read(self.frame_size)
+        if not self.source.process:
+                self.source.process = subprocess.Popen(self.source.cmd_args,bufsize = 81920, stdin=None, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                self.source.about["pid"] =  self.source.process.pid
+                self.source.proc_working = True
+                self.source.embed.add_field(name = u'Start Playing:', value = strftime("%H:%M:%S", localtime(time())),inline=True)
+
+        raw = self.source.process.stdout.read(int(self.frame_size))
 	if len(raw) < self.frame_size:
-		try:
-			have_error = self.source.proc.stderr.read()
-			if have_error and self.source.stream and self.source.respond:
-				self.source.error_embed.description = have_error
-				self.source.error_embed.add_field(name = u'Last played time:', value = u'{}'.format(sectohum(seconds=int(self.source.played))),inline=True)
-				gevent.spawn(self.source.respond,embed = self.source.error_embed)
-		except Exception as error:
-			print error
+		self.check_error()
 		self.source.killed()
-		self.source._proc = None
-		self.source._buffer = None
-		self.source = None
 		return None
+
 	return self.encode(raw, self.samples_per_frame)
 
 

@@ -33,7 +33,13 @@ class Player(LoggingClass):
 
 	self.force_return = 1
 	self.max_returns = 1
-	self.sleep_time_returns = 30
+	self.sleep_time_returns = 3
+
+	# replay
+	self.replay = False
+
+	# Text channel
+	self.text_id = None
 
         # Queue contains playable items
         self.queue = queue or PlayableQueue()
@@ -46,6 +52,9 @@ class Player(LoggingClass):
 
         # Current playing item
         self.now_playing = None
+
+	# Last playing item
+	self.then_playing = None
 
         # Current play task
         self.play_task = None
@@ -69,7 +78,6 @@ class Player(LoggingClass):
 	else:
 		print u'source have unknown type???'
 
-
     def pause(self):
         if self.paused:
             return
@@ -91,23 +99,26 @@ class Player(LoggingClass):
         if frame is None:
             return
 
+        connected = True
+
         start = time.time()
         loops = 0
 
-	if item.source.need_alarm:
-		#item.source.respond(embed = item.source.embed)
-		gevent.spawn(item.source.respond,embed = item.source.embed)
+	if getattr(item.source,"broadcast",True) and getattr(item.source,"embed",None):
+		try:
+			gevent.spawn(self.client.client.api.channels_messages_create, channel = self.text_id, embed = item.source.embed)
+		except Exception as error:
+			print error
+			pass
+
+        try:    
+                print item
+        except Exception as error:
+                print error
+                pass
 
         while True:
             loops += 1
-
-            if self.paused:
-                self.client.set_speaking(False)
-                self.paused.wait()
-                gevent.sleep(2)
-                self.client.set_speaking(True)
-                start = time.time()
-                loops = 0
 
             if self.client.state == VoiceState.DISCONNECTED:
                 return
@@ -121,31 +132,34 @@ class Player(LoggingClass):
             	self.client.increment_timestamp(item.samples_per_frame)
 	    	self.client.set_speaking(True)
 	    except WebSocketConnectionClosedException as error:
+                connected = False
 		print "WS Error: {}, gid: {}".format(error,self.client.channel.guild_id)
-		self.client.set_state(VoiceState.DISCONNECTED)
-		while self.force_return and item.source.proc_working:
+		self.client.set_state(VoiceState.RECONNECTING)
+		while self.force_return and self.max_returns < 15 and not connected:# and item.source.proc_working:
 			print "gid: {}, try number: {}, connect to WebSocket".format(self.client.channel.guild_id,self.max_returns)
 			self.max_returns += 1
 			try:
-				self.client.connect(timeout = 60)
+				#self.client.connect()
+                                self.client.state_emitter.once(VoiceState.CONNECTED, timeout=5)
 				self.max_returns = 0
-				break
+				connected = True
 			except Exception as error:
-				print "gid: {}, connect error: {}, sleep...".format(self.client.channel.guild_id,error)
+				print "gid: {}, connect error: {}, sleep... {} sec".format(self.client.channel.guild_id,error,self.sleep_time_returns)
 				gevent.sleep(self.sleep_time_returns)
+                                pass
+
+                if not self.max_returns < 15:
+                        self.client.set_state(VoiceState.DISCONNECTED)
+                        return
 
 	    # Check proc live
 	    if not item.source.proc_working:
-		self.client.set_speaking(False)
 		return
 
 	    # Get next
             frame = item.next_frame()
 	    self.last_activity = time.time()
             if frame is None:
-		self.client.set_speaking(False)
-		if item.source:
-			item.source.proc_working = False
                 return
 
             next_time = start + 0.02 * loops
@@ -154,10 +168,9 @@ class Player(LoggingClass):
             gevent.sleep(delay)
 
     def run(self):
-        #self.client.set_speaking(True)
-
+            
         while self.playing:
-            self.now_playing = self.queue.get()
+	    self.now_playing = self.queue.get()
 
             self.events.emit(self.Events.START_PLAY, self.now_playing)
             self.play_task = gevent.spawn(self.play, self.now_playing)
@@ -168,15 +181,14 @@ class Player(LoggingClass):
             self.play_task.join()
             self.events.emit(self.Events.STOP_PLAY, self.now_playing)
 
-	    if self.now_playing and self.now_playing.source:
-	    	self.now_playing.source.proc_working = False
+            self.now_playing = None
 	    self.already_play = False
 
 
             if self.client.state == VoiceState.DISCONNECTED:
                 self.playing = False
+                self.queue.clear()
                 self.complete.set()
-                return
 
         self.client.set_speaking(False)
         self.disconnect()
